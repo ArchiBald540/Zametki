@@ -1,16 +1,36 @@
-# React + Vite
-
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+# 📝 ЗАМЕТКИ ОНЛАЙН
+## ОПИСАНИЕ
+### Простое и быстрое веб-приложение для заметок. Добавляйте и удаляйте ваши задачи - всё сохраниться в браузере.
+## ✨ КАКИЕ ВОЗМОЖНОСТИ У ВАС ЕСТЬ?
+### ➕ Добавление заметок
+### ❌ Удаление заметок
+### 💾 Автосохранение (заметки не пропадают после перезагрузки), но только в границах одного браузера
+## 🚀 КАК ЗАПУСТИТЬ?
+### 1. Скачать проект
+Перейти по ссылке https://github.com/ArchiBald540/Zametki и скачать архив с проектом.
+### 2. Открыть cmd 
+Это можно сделать с помощью сочетания клавишь Win+R и в поиске ввести "cmd".
+### 3. Разархивировать проект и переместить его в тот путь, который указан в cmd
+Например: C:\Users\имя_вашего_устройства.
+### 4. Скачать Node.js
+Сделать это можно на официальном сайте по ссылке https://nodejs.org/en/download.
+### 5. Вернуться в cmd и перейти в папку проекта
+В cmd написать cd имя_папки (по умолчанию "Zametki-main"). Например: C:\Users\имя_вашего_устройства>cd имя_папки.
+### 6. Установить зависимости
+Написать таки же образом npm install.
+### 7. Запустить проект 
+Написать таким же образом npm run dev.
+### 8. Перейти на сайт
+В любом браузере перейти по ссылке http://localhost:5173.
+## 📖 КАК ПОЛЬЗОВАТЬСЯ?
+### 1. Написать текст в полях "Название заметки" и "Текст заметки".
+### 2. Нажать на синюю кнопку "Добавить заметку".
+### 3. Если хотите удалить заметку, нужно нажать на красную кнопку "Удалить" под заметкой.
+### 4. Все данные автоматически сохраняются, можете перезапускать браузер и устройство.
+## 🛠️ ТЕХНОЛОГИИ
+### - localStorage (сохранение данных при обновлении и перезапуске)
+## ⚠️ ВАЖНАЯ ИНФОРМАЦИЯ
+### Веб-приложение находится на стадии разработки, так что возможны баги и недочёты, а также малое количество функций и фишек.
+## ❤️ АВТОРЫ
+### Куныгин Сергей, Халитов Артур, Демидовец Никита, Юдина Наталья (ПрИ-102)
+### Ник на GitHub: @skacb0n, @ArchiBald, @Nyulad, @nataha6824-coder (соотвественно)
