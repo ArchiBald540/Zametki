@@ -59,8 +59,9 @@ function App() {
   }, [editingNoteId, openedNote, isCreatingNewNote])
 
   function addTagToNewNote() {
-    if (newNoteCurrentTag.trim() && !newNoteTags.includes(newNoteCurrentTag.trim())) {
-      setNewNoteTags([...newNoteTags, newNoteCurrentTag.trim()])
+    const trimmedTag = newNoteCurrentTag.trim()
+    if (trimmedTag && !newNoteTags.includes(trimmedTag)) {
+      setNewNoteTags([...newNoteTags, trimmedTag])
       setNewNoteCurrentTag("")
     }
   }
@@ -70,8 +71,9 @@ function App() {
   }
 
   function addTagToEditingNote() {
-    if (editNoteCurrentTag.trim() && !editNoteTags.includes(editNoteCurrentTag.trim())) {
-      setEditNoteTags([...editNoteTags, editNoteCurrentTag.trim()])
+    const trimmedTag = editNoteCurrentTag.trim()
+    if (trimmedTag && !editNoteTags.includes(trimmedTag)) {
+      setEditNoteTags([...editNoteTags, trimmedTag])
       setEditNoteCurrentTag("")
     }
   }
@@ -101,11 +103,24 @@ function App() {
   }
 
   function createNewNote() {
-    const finalTitle = newNoteTitle.trim() === "" ? "Заголовок заметки" : newNoteTitle
+    const hasTitle = newNoteTitle.trim() !== ""
+    const hasText = newNoteText.trim() !== ""
+    
+    if (!hasTitle && !hasText && newNoteType === "regular") {
+      alert("Заполните хотя бы одно поле: название или текст")
+      return
+    }
+    
+    let finalTitle = newNoteTitle.trim()
+    if (finalTitle === "") {
+      finalTitle = "Название"
+    } else {
+      finalTitle = finalTitle.replace(/\s+/g, ' ')
+    }
     
     let createdNote
     if (newNoteType === "regular") {
-      const finalText = newNoteText.trim() === "" ? "Текст заметки" : newNoteText
+      let finalText = newNoteText.trim() === "" ? "" : newNoteText
       createdNote = {
         id: Date.now(),
         type: "regular",
@@ -119,6 +134,10 @@ function App() {
       }
     } else {
       const validTodoItems = newNoteTodoItems.filter(item => item.text.trim() !== "")
+      if (validTodoItems.length === 0 && !hasTitle) {
+        alert("Добавьте хотя бы один пункт в список или укажите название")
+        return
+      }
       if (validTodoItems.length === 0) {
         validTodoItems.push({ id: Date.now(), text: "Новый пункт", completed: false })
       }
@@ -165,7 +184,11 @@ function App() {
 
   function startEditingNote(note) {
     setEditingNoteId(note.id)
-    setEditNoteTitle(note.title)
+    let editedTitle = note.title
+    if (editedTitle === "Название") {
+      editedTitle = ""
+    }
+    setEditNoteTitle(editedTitle)
     setEditNotePriority(note.priority || 3)
     setEditNoteColor(note.color || "#f5f5f0")
     setEditNoteTags(note.tags || [])
@@ -201,13 +224,26 @@ function App() {
   }
 
   function saveEditedNote() {
-    const finalTitle = editNoteTitle.trim() === "" ? "Заголовок заметки" : editNoteTitle
+    const hasTitle = editNoteTitle.trim() !== ""
+    const hasText = editNoteText.trim() !== ""
+    
+    if (!hasTitle && !hasText && editNoteType === "regular") {
+      alert("Заполните хотя бы одно поле: название или текст")
+      return
+    }
+    
+    let finalTitle = editNoteTitle.trim()
+    if (finalTitle === "") {
+      finalTitle = "Название"
+    } else {
+      finalTitle = finalTitle.replace(/\s+/g, ' ')
+    }
 
     setAllNotes(prevNotes =>
       prevNotes.map(note => {
         if (note.id === editingNoteId) {
           if (editNoteType === "regular") {
-            const finalText = editNoteText.trim() === "" ? "Текст заметки" : editNoteText
+            let finalText = editNoteText.trim() === "" ? "" : editNoteText
             return {
               ...note,
               type: "regular",
@@ -219,6 +255,10 @@ function App() {
             }
           } else {
             const validTodoItems = editNoteTodoItems.filter(item => item.text.trim() !== "")
+            if (validTodoItems.length === 0 && !hasTitle) {
+              alert("Добавьте хотя бы один пункт в список или укажите название")
+              return note
+            }
             if (validTodoItems.length === 0) {
               validTodoItems.push({ id: Date.now(), text: "Новый пункт", completed: false })
             }
@@ -243,7 +283,7 @@ function App() {
         title: finalTitle,
         type: editNoteType,
         ...(editNoteType === "regular" 
-          ? { text: editNoteText.trim() === "" ? "Текст заметки" : editNoteText }
+          ? { text: editNoteText.trim() === "" ? "" : editNoteText }
           : { todoItems: editNoteTodoItems.filter(item => item.text.trim() !== "") }),
         priority: editNotePriority,
         color: editNoteColor,
@@ -437,10 +477,10 @@ function App() {
                   {note.isPinned ? "📌" : "📍"}
                 </button>
               </div>
-              <h3 style={styles.cardTitle}>{note.title}</h3>
+              <h3 style={styles.cardTitle} title={note.title}>{note.title}</h3>
               <div style={styles.cardPreview}>
                 {note.type === "regular" 
-                  ? note.text.slice(0, 100)
+                  ? (note.text ? note.text.slice(0, 100) : "")
                   : `${note.todoItems.filter(item => item.completed).length}/${note.todoItems.length} выполнено`}
               </div>
               {note.tags && note.tags.length > 0 && (
@@ -492,6 +532,7 @@ function App() {
                     value={newNoteTitle}
                     onChange={(e) => setNewNoteTitle(e.target.value)}
                     style={styles.modalInput}
+                    maxLength={100}
                   />
                   
                   <div style={styles.formField}>
@@ -560,7 +601,7 @@ function App() {
                 </div>
                 
                 <div style={styles.modalBody}>
-                  <input type="text" value={editNoteTitle} onChange={(e) => setEditNoteTitle(e.target.value)} style={styles.modalInput} />
+                  <input type="text" value={editNoteTitle} onChange={(e) => setEditNoteTitle(e.target.value)} style={styles.modalInput} maxLength={100} placeholder="Название" />
                   
                   <div style={styles.formField}>
                     <label>Приоритет</label>
@@ -604,7 +645,7 @@ function App() {
                   </div>
                   
                   {editNoteType === "regular" ? (
-                    <textarea value={editNoteText} onChange={(e) => setEditNoteText(e.target.value)} style={styles.modalTextarea} />
+                    <textarea value={editNoteText} onChange={(e) => setEditNoteText(e.target.value)} style={styles.modalTextarea} placeholder="Текст" />
                   ) : (
                     <div>
                       {editNoteTodoItems.map((item, index) => (
@@ -639,7 +680,7 @@ function App() {
                 </div>
                 <div style={styles.modalBody}>
                   {openedNote.type === "regular" ? (
-                    <p style={styles.modalText}>{formatTextWithLineBreaks(openedNote.text)}</p>
+                    <p style={styles.modalText}>{openedNote.text ? formatTextWithLineBreaks(openedNote.text) : ""}</p>
                   ) : (
                     <div>
                       {openedNote.todoItems.map((item) => (
