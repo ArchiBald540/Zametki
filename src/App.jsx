@@ -1,5 +1,53 @@
 import './App.css'
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo, useRef } from "react"
+
+// ---------- Color helper utilities ----------
+// These are used to automatically pick a readable / matching toolbar color
+// for ANY note color or theme accent color chosen from the palette.
+function hexToRgb(hex) {
+  let clean = (hex || "#f5f5f0").replace('#', '')
+  if (clean.length === 3) clean = clean.split('').map(c => c + c).join('')
+  const num = parseInt(clean, 16)
+  return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 }
+}
+
+function rgbToHex(r, g, b) {
+  const clamp = v => Math.max(0, Math.min(255, Math.round(v)))
+  return `#${[r, g, b].map(v => clamp(v).toString(16).padStart(2, '0')).join('')}`
+}
+
+function getRelativeLuminance(hex) {
+  const { r, g, b } = hexToRgb(hex)
+  const a = [r, g, b].map(v => {
+    v /= 255
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+  })
+  return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2]
+}
+
+function getReadableTextColor(hex) {
+  return getRelativeLuminance(hex) > 0.55 ? "#1a1a2e" : "#ffffff"
+}
+
+function adjustColorBrightness(hex, amount) {
+  const { r, g, b } = hexToRgb(hex)
+  return rgbToHex(r + amount, g + amount, b + amount)
+}
+
+// Given ANY color from the palette, pick a matching toolbar (header/footer) color
+function getToolbarColors(hex) {
+  const base = hex || "#f5f5f0"
+  const lum = getRelativeLuminance(base)
+  const bg = lum > 0.5 ? adjustColorBrightness(base, -22) : adjustColorBrightness(base, 34)
+  return { backgroundColor: bg, color: getReadableTextColor(bg) }
+}
+
+// Theme toggle button color, derived from the app accent color + current theme
+function getThemeButtonColors(isDark) {
+  const accent = "#8b5cf6"
+  const bg = isDark ? adjustColorBrightness(accent, 45) : adjustColorBrightness(accent, -15)
+  return { backgroundColor: bg, color: getReadableTextColor(bg) }
+}
 
 function App() {
   const [allNotes, setAllNotes] = useState([])
@@ -14,6 +62,8 @@ function App() {
   const [newNoteTags, setNewNoteTags] = useState([])
   const [newNoteCurrentTag, setNewNoteCurrentTag] = useState("")
   const [newNoteTodoItems, setNewNoteTodoItems] = useState([{ id: Date.now(), text: "", completed: false }])
+  const [newNoteImages, setNewNoteImages] = useState([])
+  const [newNoteTableData, setNewNoteTableData] = useState([["", ""], ["", ""]])
   
   const [editingNoteId, setEditingNoteId] = useState(null)
   const [editNoteTitle, setEditNoteTitle] = useState("")
@@ -24,6 +74,8 @@ function App() {
   const [editNoteTags, setEditNoteTags] = useState([])
   const [editNoteCurrentTag, setEditNoteCurrentTag] = useState("")
   const [editNoteTodoItems, setEditNoteTodoItems] = useState([])
+  const [editNoteImages, setEditNoteImages] = useState([])
+  const [editNoteTableData, setEditNoteTableData] = useState([["", ""], ["", ""]])
   
   const [sortType, setSortType] = useState("dateNew")
   const [filterByNoteType, setFilterByNoteType] = useState("all")
@@ -39,7 +91,17 @@ function App() {
   const [archiveNotes, setArchiveNotes] = useState([])
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
 
-  const availableColors = ["#f5f5f0", "#f5e0e0", "#f5e6d3", "#f5f0d3", "#d3f5d3", "#d3e8f5", "#e6d3f5", "#f5d3e8"]
+  const availableColors = ["#f5f5f0", "#f5e0e0", "#f5e6d3", "#f5f0d3", "#d3f5d3", "#d3e8f5", "#e6d3f5", "#f5d3e8", "#ffd6d6", "#ffe8b3", "#c9f5c9", "#b3e0ff", "#d9c2f0", "#ffc2e0", "#c2f0e0", "#e8e8e8"]
+
+  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "system")
+  const [systemPrefersDark, setSystemPrefersDark] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)").matches : false
+  )
+  const isDarkMode = theme === "dark" || (theme === "system" && systemPrefersDark)
+  const [showThemeMenu, setShowThemeMenu] = useState(false)
+
+  const newNoteFileInputRef = useRef(null)
+  const editNoteFileInputRef = useRef(null)
 
   useEffect(() => {
     const savedNotes = localStorage.getItem("notes")
@@ -56,6 +118,22 @@ function App() {
     localStorage.setItem("notes", JSON.stringify(allNotes))
     localStorage.setItem("archiveNotes", JSON.stringify(archiveNotes))
   }, [allNotes, archiveNotes])
+
+  useEffect(() => {
+    localStorage.setItem("theme", theme)
+  }, [theme])
+
+  useEffect(() => {
+    if (!window.matchMedia) return
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)")
+    const handleChange = (e) => setSystemPrefersDark(e.matches)
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [])
+
+  function cycleTheme() {
+    setTheme(prev => prev === "light" ? "dark" : prev === "dark" ? "system" : "light")
+  }
 
   useEffect(() => {
     const handleEscapeKey = (event) => {
@@ -224,12 +302,75 @@ function App() {
     ))
   }
 
+  function handleImageFilesSelected(fileList, isEditing) {
+    const files = Array.from(fileList || [])
+    files.forEach(file => {
+      if (!file.type.startsWith("image/")) return
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        const dataUrl = event.target.result
+        if (isEditing) {
+          setEditNoteImages(prev => [...prev, dataUrl])
+        } else {
+          setNewNoteImages(prev => [...prev, dataUrl])
+        }
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+
+  function removeNewNoteImage(index) {
+    setNewNoteImages(prev => prev.filter((_, i) => i !== index))
+  }
+
+  function removeEditNoteImage(index) {
+    setEditNoteImages(prev => prev.filter((_, i) => i !== index))
+  }
+
+  // ----- Table note helpers -----
+  function updateTableCell(isEditing, rowIndex, colIndex, value) {
+    const updater = (table) => table.map((row, rIdx) =>
+      rIdx === rowIndex ? row.map((cell, cIdx) => cIdx === colIndex ? value : cell) : row
+    )
+    if (isEditing) {
+      setEditNoteTableData(prev => updater(prev))
+    } else {
+      setNewNoteTableData(prev => updater(prev))
+    }
+  }
+
+  function addTableRow(isEditing) {
+    if (isEditing) {
+      setEditNoteTableData(prev => [...prev, prev[0].map(() => "")])
+    } else {
+      setNewNoteTableData(prev => [...prev, prev[0].map(() => "")])
+    }
+  }
+
+  function addTableColumn(isEditing) {
+    if (isEditing) {
+      setEditNoteTableData(prev => prev.map(row => [...row, ""]))
+    } else {
+      setNewNoteTableData(prev => prev.map(row => [...row, ""]))
+    }
+  }
+
+  function removeTableRow(isEditing, rowIndex) {
+    const setter = isEditing ? setEditNoteTableData : setNewNoteTableData
+    setter(prev => prev.length > 1 ? prev.filter((_, i) => i !== rowIndex) : prev)
+  }
+
+  function removeTableColumn(isEditing, colIndex) {
+    const setter = isEditing ? setEditNoteTableData : setNewNoteTableData
+    setter(prev => prev[0].length > 1 ? prev.map(row => row.filter((_, i) => i !== colIndex)) : prev)
+  }
+
   function createNewNote() {
     const hasTitle = newNoteTitle.trim() !== ""
     const hasText = newNoteText.trim() !== ""
     
-    if (!hasTitle && !hasText && newNoteType === "regular") {
-      alert("Заполните хотя бы одно поле: название или текст")
+    if (!hasTitle && !hasText && newNoteType === "regular" && newNoteImages.length === 0) {
+      alert("Заполните хотя бы одно поле: название, текст или добавьте картинку")
       return
     }
     
@@ -248,6 +389,7 @@ function App() {
         type: "regular",
         title: finalTitle,
         text: finalText,
+        images: newNoteImages,
         priority: newNotePriority,
         color: newNoteColor,
         tags: newNoteTags,
@@ -255,7 +397,7 @@ function App() {
         parentFolderId: currentFolderId,
         createdAt: new Date().toISOString()
       }
-    } else {
+    } else if (newNoteType === "todo") {
       const validTodoItems = newNoteTodoItems.filter(item => item.text.trim() !== "")
       if (validTodoItems.length === 0 && !hasTitle) {
         alert("Добавьте хотя бы один пункт в список или укажите название")
@@ -269,6 +411,21 @@ function App() {
         type: "todo",
         title: finalTitle,
         todoItems: validTodoItems,
+        images: newNoteImages,
+        priority: newNotePriority,
+        color: newNoteColor,
+        tags: newNoteTags,
+        isPinned: false,
+        parentFolderId: currentFolderId,
+        createdAt: new Date().toISOString()
+      }
+    } else {
+      createdNote = {
+        id: Date.now(),
+        type: "table",
+        title: finalTitle,
+        tableData: newNoteTableData,
+        images: newNoteImages,
         priority: newNotePriority,
         color: newNoteColor,
         tags: newNoteTags,
@@ -291,6 +448,8 @@ function App() {
     setNewNoteType("regular")
     setNewNotePriority(3)
     setNewNoteColor("#f5f5f0")
+    setNewNoteImages([])
+    setNewNoteTableData([["", ""], ["", ""]])
   }
 
   function deleteNoteById(noteId) {
@@ -322,10 +481,17 @@ function App() {
         editedText = ""
       }
       setEditNoteText(editedText)
-    } else {
+      setEditNoteTableData([["", ""], ["", ""]])
+    } else if (note.type === "todo") {
       setEditNoteType("todo")
       setEditNoteTodoItems(note.todoItems.map(item => ({ ...item, id: Date.now() + Math.random() })))
+      setEditNoteTableData([["", ""], ["", ""]])
+    } else {
+      setEditNoteType("table")
+      setEditNoteTodoItems([])
+      setEditNoteTableData(note.tableData ? note.tableData.map(row => [...row]) : [["", ""], ["", ""]])
     }
+    setEditNoteImages(note.images || [])
   }
 
   function toggleTodoItemInOpenedNote(itemId) {
@@ -354,8 +520,8 @@ function App() {
     const hasTitle = editNoteTitle.trim() !== ""
     const hasText = editNoteText.trim() !== ""
     
-    if (!hasTitle && !hasText && editNoteType === "regular") {
-      alert("Заполните хотя бы одно поле: название или текст")
+    if (!hasTitle && !hasText && editNoteType === "regular" && editNoteImages.length === 0) {
+      alert("Заполните хотя бы одно поле: название, текст или добавьте картинку")
       return
     }
     
@@ -365,6 +531,8 @@ function App() {
     } else {
       finalTitle = finalTitle.replace(/\s+/g, ' ')
     }
+
+    let bailedOut = false
 
     setAllNotes(prevNotes =>
       prevNotes.map(note => {
@@ -376,14 +544,16 @@ function App() {
               type: "regular",
               title: finalTitle,
               text: finalText,
+              images: editNoteImages,
               priority: editNotePriority,
               color: editNoteColor,
               tags: editNoteTags
             }
-          } else {
+          } else if (editNoteType === "todo") {
             const validTodoItems = editNoteTodoItems.filter(item => item.text.trim() !== "")
             if (validTodoItems.length === 0 && !hasTitle) {
               alert("Добавьте хотя бы один пункт в список или укажите название")
+              bailedOut = true
               return note
             }
             if (validTodoItems.length === 0) {
@@ -394,6 +564,18 @@ function App() {
               type: "todo",
               title: finalTitle,
               todoItems: validTodoItems,
+              images: editNoteImages,
+              priority: editNotePriority,
+              color: editNoteColor,
+              tags: editNoteTags
+            }
+          } else {
+            return {
+              ...note,
+              type: "table",
+              title: finalTitle,
+              tableData: editNoteTableData,
+              images: editNoteImages,
               priority: editNotePriority,
               color: editNoteColor,
               tags: editNoteTags
@@ -404,14 +586,19 @@ function App() {
       })
     )
 
+    if (bailedOut) return
+
     if (openedNote?.id === editingNoteId) {
       setOpenedNote(prev => ({
         ...prev,
         title: finalTitle,
         type: editNoteType,
-        ...(editNoteType === "regular" 
+        ...(editNoteType === "regular"
           ? { text: editNoteText.trim() === "" ? "" : editNoteText }
-          : { todoItems: editNoteTodoItems.filter(item => item.text.trim() !== "") }),
+          : editNoteType === "todo"
+            ? { todoItems: editNoteTodoItems.filter(item => item.text.trim() !== "") }
+            : { tableData: editNoteTableData }),
+        images: editNoteImages,
         priority: editNotePriority,
         color: editNoteColor,
         tags: editNoteTags
@@ -430,6 +617,8 @@ function App() {
     setEditNoteType("regular")
     setEditNotePriority(3)
     setEditNoteColor("#f5f5f0")
+    setEditNoteImages([])
+    setEditNoteTableData([["", ""], ["", ""]])
   }
 
   function cancelEditing() {
@@ -451,6 +640,22 @@ function App() {
 
   function renderPriorityStars(priority) {
     return "⭐".repeat(priority) + "☆".repeat(5 - priority)
+  }
+
+  function deleteTagEverywhere(tagToDelete) {
+    setAllNotes(prevNotes =>
+      prevNotes.map(note =>
+        note.tags ? { ...note, tags: note.tags.filter(tag => tag !== tagToDelete) } : note
+      )
+    )
+    setArchiveNotes(prevNotes =>
+      prevNotes.map(note =>
+        note.tags ? { ...note, tags: note.tags.filter(tag => tag !== tagToDelete) } : note
+      )
+    )
+    if (tagSearchText.trim().toLowerCase() === tagToDelete.toLowerCase()) {
+      setTagSearchText("")
+    }
   }
 
   function getAllExistingTags() {
@@ -498,11 +703,25 @@ function App() {
     return [...pinnedNotes.sort(sortFunction), ...unpinnedNotes.sort(sortFunction)]
   }
 
+  function renderNotePreviewContent(note) {
+    if (note.type === "regular") {
+      return note.text ? note.text.slice(0, 100) : ""
+    } else if (note.type === "todo") {
+      return `${note.todoItems.filter(item => item.completed).length}/${note.todoItems.length} выполнено`
+    } else if (note.type === "table") {
+      const rows = note.tableData ? note.tableData.length : 0
+      const cols = note.tableData && note.tableData[0] ? note.tableData[0].length : 0
+      return `📊 Таблица ${rows}×${cols}`
+    }
+    return ""
+  }
+
   const currentItems = getCurrentItems()
   const folders = currentItems.filter(item => item.type === "folder")
   const notes = getFilteredAndSortedNotes()
   const allExistingTags = getAllExistingTags()
   const allFolders = getAllFoldersList()
+  const styles = useMemo(() => getStyles(isDarkMode), [isDarkMode])
 
   return (
     <div style={styles.appContainer}>
@@ -574,6 +793,15 @@ function App() {
           >
             ✓ Списки
           </button>
+          <button
+            onClick={() => setFilterByNoteType("table")}
+            style={{
+              ...styles.filterButton,
+              ...(filterByNoteType === "table" && styles.activeFilterButton)
+            }}
+          >
+            📊 Таблицы
+          </button>
         </div>
 
         <div style={styles.tagSearchSection}>
@@ -587,14 +815,28 @@ function App() {
           />
           {allExistingTags.length > 0 && (
             <div style={styles.quickTagsList}>
-              {allExistingTags.slice(0, 5).map(tag => (
-                <button
-                  key={tag}
-                  onClick={() => setTagSearchText(tag)}
-                  style={styles.quickTagButton}
-                >
-                  #{tag}
-                </button>
+              {allExistingTags.map(tag => (
+                <span key={tag} style={styles.quickTagChip}>
+                  <button
+                    onClick={() => setTagSearchText(tag)}
+                    style={styles.quickTagButton}
+                    title="Найти заметки с этим тегом"
+                  >
+                    #{tag}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (window.confirm(`Удалить тег "#${tag}" со всех заметок?`)) {
+                        deleteTagEverywhere(tag)
+                      }
+                    }}
+                    style={styles.quickTagDeleteButton}
+                    title="Удалить тег отовсюду"
+                  >
+                    ×
+                  </button>
+                </span>
               ))}
             </div>
           )}
@@ -640,10 +882,11 @@ function App() {
                     <div onClick={() => setOpenedNote(note)}>
                       <h3 style={styles.cardTitle} title={note.title}>{note.title}</h3>
                       <div style={styles.cardPreview}>
-                        {note.type === "regular" 
-                          ? (note.text ? note.text.slice(0, 100) : "")
-                          : `${note.todoItems.filter(item => item.completed).length}/${note.todoItems.length} выполнено`}
+                        {renderNotePreviewContent(note)}
                       </div>
+                      {note.images && note.images.length > 0 && (
+                        <div style={styles.cardImageBadge}>🖼️ {note.images.length}</div>
+                      )}
                       {note.tags && note.tags.length > 0 && (
                         <div style={styles.cardTags}>
                           {note.tags.slice(0, 3).map(tag => (
@@ -770,10 +1013,11 @@ function App() {
                     <div onClick={() => setOpenedNote(note)}>
                       <h3 style={styles.cardTitle} title={note.title}>{note.title}</h3>
                       <div style={styles.cardPreview}>
-                        {note.type === "regular" 
-                          ? (note.text ? note.text.slice(0, 100) : "")
-                          : `${note.todoItems.filter(item => item.completed).length}/${note.todoItems.length} выполнено`}
+                        {renderNotePreviewContent(note)}
                       </div>
+                      {note.images && note.images.length > 0 && (
+                        <div style={styles.cardImageBadge}>🖼️ {note.images.length}</div>
+                      )}
                       {note.tags && note.tags.length > 0 && (
                         <div style={styles.cardTags}>
                           {note.tags.slice(0, 3).map(tag => (
@@ -884,9 +1128,9 @@ function App() {
           <div style={styles.modalWindow} onClick={(e) => e.stopPropagation()}>
             {isCreatingNewNote ? (
               <div style={{...styles.modalContent, backgroundColor: newNoteColor}}>
-                <div style={styles.modalHeader}>
+                <div style={{...styles.modalHeader, ...getToolbarColors(newNoteColor)}}>
                   <h2>Создание заметки</h2>
-                  <button onClick={() => setIsCreatingNewNote(false)} style={styles.closeButton}>×</button>
+                  <button onClick={() => setIsCreatingNewNote(false)} style={{...styles.closeButton, color: getToolbarColors(newNoteColor).color}}>×</button>
                 </div>
                 
                 <div style={styles.modalBody}>
@@ -914,6 +1158,10 @@ function App() {
                       {availableColors.map(color => (
                         <button key={color} onClick={() => setNewNoteColor(color)} style={{...styles.colorCircle, backgroundColor: color, border: newNoteColor === color ? "3px solid #8b5cf6" : "1px solid #d1d5db"}} />
                       ))}
+                      <label style={styles.customColorSwatch} title="Выбрать любой цвет">
+                        <input type="color" value={newNoteColor} onChange={(e) => setNewNoteColor(e.target.value)} style={styles.customColorInput} />
+                        🎨
+                      </label>
                     </div>
                   </div>
 
@@ -937,31 +1185,82 @@ function App() {
                     <div style={styles.typeSelector}>
                       <button onClick={() => setNewNoteType("regular")} style={{...styles.typeButton, ...(newNoteType === "regular" && styles.activeTypeButton)}}>📝 Обычная</button>
                       <button onClick={() => setNewNoteType("todo")} style={{...styles.typeButton, ...(newNoteType === "todo" && styles.activeTypeButton)}}>✓ Список</button>
+                      <button onClick={() => setNewNoteType("table")} style={{...styles.typeButton, ...(newNoteType === "table" && styles.activeTypeButton)}}>📊 Таблица</button>
                     </div>
                   </div>
                   
                   {newNoteType === "regular" ? (
                     <textarea placeholder="Текст (необязательно, если есть название)" value={newNoteText} onChange={(e) => setNewNoteText(e.target.value)} style={styles.modalTextarea} />
-                  ) : (
+                  ) : newNoteType === "todo" ? (
                     <div>
                       {newNoteTodoItems.map((item, index) => (
                         <input key={item.id} type="text" placeholder={`Пункт ${index + 1}`} value={item.text} onChange={(e) => updateNewNoteTodoItem(item.id, e.target.value)} style={styles.todoInput} />
                       ))}
                       <button onClick={addTodoItemToNewNote} style={styles.addTodoButton}>+ Добавить пункт</button>
                     </div>
+                  ) : (
+                    <div>
+                      <div style={styles.tableEditWrapper}>
+                        {newNoteTableData.map((row, rIdx) => (
+                          <div key={rIdx} style={styles.tableEditRow}>
+                            {row.map((cell, cIdx) => (
+                              <input
+                                key={cIdx}
+                                type="text"
+                                value={cell}
+                                onChange={(e) => updateTableCell(false, rIdx, cIdx, e.target.value)}
+                                style={styles.tableEditCell}
+                                placeholder={rIdx === 0 ? `Кол. ${cIdx + 1}` : ""}
+                              />
+                            ))}
+                            <button onClick={() => removeTableRow(false, rIdx)} style={styles.tableRemoveButton} title="Удалить строку">×</button>
+                          </div>
+                        ))}
+                        <div style={styles.tableEditRow}>
+                          {newNoteTableData[0].map((_, cIdx) => (
+                            <button key={cIdx} onClick={() => removeTableColumn(false, cIdx)} style={styles.tableColRemoveButton} title="Удалить столбец">🗑</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={styles.tableButtonsRow}>
+                        <button onClick={() => addTableRow(false)} style={styles.addTodoButton}>+ Строка</button>
+                        <button onClick={() => addTableColumn(false)} style={styles.addTodoButton}>+ Столбец</button>
+                      </div>
+                    </div>
                   )}
+
+                  <div style={styles.formField}>
+                    <label>Картинки</label>
+                    <div style={styles.imagesGrid}>
+                      {newNoteImages.map((img, idx) => (
+                        <div key={idx} style={styles.imageThumbWrapper}>
+                          <img src={img} alt="" style={styles.imageThumb} />
+                          <button onClick={() => removeNewNoteImage(idx)} style={styles.imageRemoveButton}>×</button>
+                        </div>
+                      ))}
+                      <button onClick={() => newNoteFileInputRef.current?.click()} style={styles.imageAddButton}>+ 🖼️</button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        ref={newNoteFileInputRef}
+                        onChange={(e) => { handleImageFilesSelected(e.target.files, false); e.target.value = "" }}
+                        style={{ display: "none" }}
+                      />
+                    </div>
+                  </div>
                 </div>
                 
-                <div style={styles.modalFooter}>
+                <div style={{...styles.modalFooter, ...getToolbarColors(newNoteColor)}}>
                   <button onClick={createNewNote} style={styles.saveButton}>💾 Сохранить</button>
                   <button onClick={() => setIsCreatingNewNote(false)} style={styles.cancelButton}>❌ Отмена</button>
                 </div>
               </div>
             ) : openedNote && editingNoteId === openedNote.id ? (
               <div style={{...styles.modalContent, backgroundColor: editNoteColor}}>
-                <div style={styles.modalHeader}>
+                <div style={{...styles.modalHeader, ...getToolbarColors(editNoteColor)}}>
                   <h2>Редактирование</h2>
-                  <button onClick={() => setEditingNoteId(null)} style={styles.closeButton}>×</button>
+                  <button onClick={() => setEditingNoteId(null)} style={{...styles.closeButton, color: getToolbarColors(editNoteColor).color}}>×</button>
                 </div>
                 
                 <div style={styles.modalBody}>
@@ -982,6 +1281,10 @@ function App() {
                       {availableColors.map(color => (
                         <button key={color} onClick={() => setEditNoteColor(color)} style={{...styles.colorCircle, backgroundColor: color, border: editNoteColor === color ? "3px solid #8b5cf6" : "1px solid #d1d5db"}} />
                       ))}
+                      <label style={styles.customColorSwatch} title="Выбрать любой цвет">
+                        <input type="color" value={editNoteColor} onChange={(e) => setEditNoteColor(e.target.value)} style={styles.customColorInput} />
+                        🎨
+                      </label>
                     </div>
                   </div>
 
@@ -1005,32 +1308,83 @@ function App() {
                     <div style={styles.typeSelector}>
                       <button onClick={() => setEditNoteType("regular")} style={{...styles.typeButton, ...(editNoteType === "regular" && styles.activeTypeButton)}}>📝 Обычная</button>
                       <button onClick={() => setEditNoteType("todo")} style={{...styles.typeButton, ...(editNoteType === "todo" && styles.activeTypeButton)}}>✓ Список</button>
+                      <button onClick={() => setEditNoteType("table")} style={{...styles.typeButton, ...(editNoteType === "table" && styles.activeTypeButton)}}>📊 Таблица</button>
                     </div>
                   </div>
                   
                   {editNoteType === "regular" ? (
                     <textarea value={editNoteText} onChange={(e) => setEditNoteText(e.target.value)} style={styles.modalTextarea} placeholder="Текст (необязательно, если есть название)" />
-                  ) : (
+                  ) : editNoteType === "todo" ? (
                     <div>
                       {editNoteTodoItems.map((item, index) => (
                         <input key={item.id} type="text" placeholder={`Пункт ${index + 1}`} value={item.text} onChange={(e) => updateEditingNoteTodoItem(item.id, e.target.value)} style={styles.todoInput} />
                       ))}
                       <button onClick={addTodoItemToEditingNote} style={styles.addTodoButton}>+ Добавить пункт</button>
                     </div>
+                  ) : (
+                    <div>
+                      <div style={styles.tableEditWrapper}>
+                        {editNoteTableData.map((row, rIdx) => (
+                          <div key={rIdx} style={styles.tableEditRow}>
+                            {row.map((cell, cIdx) => (
+                              <input
+                                key={cIdx}
+                                type="text"
+                                value={cell}
+                                onChange={(e) => updateTableCell(true, rIdx, cIdx, e.target.value)}
+                                style={styles.tableEditCell}
+                                placeholder={rIdx === 0 ? `Кол. ${cIdx + 1}` : ""}
+                              />
+                            ))}
+                            <button onClick={() => removeTableRow(true, rIdx)} style={styles.tableRemoveButton} title="Удалить строку">×</button>
+                          </div>
+                        ))}
+                        <div style={styles.tableEditRow}>
+                          {editNoteTableData[0].map((_, cIdx) => (
+                            <button key={cIdx} onClick={() => removeTableColumn(true, cIdx)} style={styles.tableColRemoveButton} title="Удалить столбец">🗑</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={styles.tableButtonsRow}>
+                        <button onClick={() => addTableRow(true)} style={styles.addTodoButton}>+ Строка</button>
+                        <button onClick={() => addTableColumn(true)} style={styles.addTodoButton}>+ Столбец</button>
+                      </div>
+                    </div>
                   )}
+
+                  <div style={styles.formField}>
+                    <label>Картинки</label>
+                    <div style={styles.imagesGrid}>
+                      {editNoteImages.map((img, idx) => (
+                        <div key={idx} style={styles.imageThumbWrapper}>
+                          <img src={img} alt="" style={styles.imageThumb} />
+                          <button onClick={() => removeEditNoteImage(idx)} style={styles.imageRemoveButton}>×</button>
+                        </div>
+                      ))}
+                      <button onClick={() => editNoteFileInputRef.current?.click()} style={styles.imageAddButton}>+ 🖼️</button>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        ref={editNoteFileInputRef}
+                        onChange={(e) => { handleImageFilesSelected(e.target.files, true); e.target.value = "" }}
+                        style={{ display: "none" }}
+                      />
+                    </div>
+                  </div>
                 </div>
                 
-                <div style={styles.modalFooter}>
+                <div style={{...styles.modalFooter, ...getToolbarColors(editNoteColor)}}>
                   <button onClick={saveEditedNote} style={styles.saveButton}>💾 Сохранить</button>
                   <button onClick={cancelEditing} style={styles.cancelButton}>❌ Отмена</button>
                 </div>
               </div>
             ) : openedNote && (
               <div style={{...styles.modalContent, backgroundColor: openedNote.color || "#f5f5f0"}}>
-                <div style={styles.modalHeader}>
+                <div style={{...styles.modalHeader, ...getToolbarColors(openedNote.color || "#f5f5f0")}}>
                   <div>
                     <div style={styles.modalStars}>{renderPriorityStars(openedNote.priority || 3)}</div>
-                    <h2>{openedNote.title}</h2>
+                    <h2 style={{color: getToolbarColors(openedNote.color || "#f5f5f0").color}}>{openedNote.title}</h2>
                     {openedNote.tags && openedNote.tags.length > 0 && (
                       <div style={styles.modalTags}>
                         {openedNote.tags.map(tag => <span key={tag} style={styles.modalTag}>#{tag}</span>)}
@@ -1038,15 +1392,15 @@ function App() {
                     )}
                   </div>
                   <div>
-                    <button onClick={() => startEditingNote(openedNote)} style={styles.editModalButton}>✏️</button>
-                    <button onClick={() => moveToArchive(openedNote.id)} style={{...styles.editModalButton, marginRight: "8px"}} title="В архив">📦</button>
-                    <button onClick={() => setOpenedNote(null)} style={styles.closeButton}>×</button>
+                    <button onClick={() => startEditingNote(openedNote)} style={{...styles.editModalButton, color: getToolbarColors(openedNote.color || "#f5f5f0").color}}>✏️</button>
+                    <button onClick={() => moveToArchive(openedNote.id)} style={{...styles.editModalButton, color: getToolbarColors(openedNote.color || "#f5f5f0").color, marginRight: "8px"}} title="В архив">📦</button>
+                    <button onClick={() => setOpenedNote(null)} style={{...styles.closeButton, color: getToolbarColors(openedNote.color || "#f5f5f0").color}}>×</button>
                   </div>
                 </div>
                 <div style={styles.modalBody}>
                   {openedNote.type === "regular" ? (
                     <p style={styles.modalText}>{openedNote.text ? formatTextWithLineBreaks(openedNote.text) : ""}</p>
-                  ) : (
+                  ) : openedNote.type === "todo" ? (
                     <div>
                       {openedNote.todoItems.map((item) => (
                         <label key={item.id} style={{...styles.modalTodoItem, ...(item.completed && styles.completedModalTodoItem)}}>
@@ -1055,10 +1409,33 @@ function App() {
                         </label>
                       ))}
                     </div>
+                  ) : (
+                    <div style={styles.tableViewWrapper}>
+                      <table style={styles.tableView}>
+                        <tbody>
+                          {openedNote.tableData && openedNote.tableData.map((row, rIdx) => (
+                            <tr key={rIdx}>
+                              {row.map((cell, cIdx) => (
+                                rIdx === 0
+                                  ? <th key={cIdx} style={styles.tableViewHeaderCell}>{cell}</th>
+                                  : <td key={cIdx} style={styles.tableViewCell}>{cell}</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  {openedNote.images && openedNote.images.length > 0 && (
+                    <div style={styles.viewImagesGrid}>
+                      {openedNote.images.map((img, idx) => (
+                        <img key={idx} src={img} alt="" style={styles.viewImage} />
+                      ))}
+                    </div>
                   )}
                   <div style={styles.modalDate}>Создано: {new Date(openedNote.createdAt).toLocaleString()}</div>
                 </div>
-                <div style={styles.modalFooter}>
+                <div style={{...styles.modalFooter, ...getToolbarColors(openedNote.color || "#f5f5f0")}}>
                   <button onClick={() => toggleNotePinned(openedNote.id)} style={{...styles.pinModalButton, backgroundColor: openedNote.isPinned ? "#fbbf24" : "#8b5cf6"}}>
                     📌 {openedNote.isPinned ? "Открепить" : "Закрепить"}
                   </button>
@@ -1068,17 +1445,71 @@ function App() {
           </div>
         </div>
       )}
+
+      <div style={styles.themeToggleWrapper}>
+        {showThemeMenu && (
+          <div style={styles.themeMenu}>
+            <button style={{...styles.themeMenuItem, ...(theme === "light" && styles.themeMenuItemActive)}} onClick={() => { setTheme("light"); setShowThemeMenu(false) }}>☀️ Светлая</button>
+            <button style={{...styles.themeMenuItem, ...(theme === "dark" && styles.themeMenuItemActive)}} onClick={() => { setTheme("dark"); setShowThemeMenu(false) }}>🌙 Тёмная</button>
+            <button style={{...styles.themeMenuItem, ...(theme === "system" && styles.themeMenuItemActive)}} onClick={() => { setTheme("system"); setShowThemeMenu(false) }}>💻 Как в системе</button>
+          </div>
+        )}
+        <button
+          onClick={() => setShowThemeMenu(prev => !prev)}
+          style={{...styles.themeToggleButton, ...getThemeButtonColors(isDarkMode)}}
+          title="Сменить тему"
+        >
+          {theme === "light" ? "☀️" : theme === "dark" ? "🌙" : "💻"}
+        </button>
+      </div>
     </div>
   )
 }
 
-const styles = {
+function getStyles(isDark) {
+  const colors = isDark
+    ? {
+        appBg: "#0f0f1a",
+        panelBg: "#15151f",
+        panelBorder: "#2d2d3f",
+        mainBg: "#0f0f1a",
+        cardBg: "#1e1e2e",
+        cardBorder: "#2d2d3f",
+        cardShadow: "0 1px 3px rgba(0,0,0,0.4)",
+        text: "#f0f0f5",
+        textMuted: "#9ca3af",
+        border: "#2d2d3f",
+        inputBg: "#1e1e2e",
+        inputBorder: "#3a3a4a",
+        white: "#1a1a2e",
+        overlayHeaderFooter: "rgba(20,20,30,0.55)",
+        emptyText: "#7a7a8a"
+      }
+    : {
+        appBg: "#f3f4f6",
+        panelBg: "#1a1a2e",
+        panelBorder: "#2d2d3f",
+        mainBg: "#f3f4f6",
+        cardBg: "#ffffff",
+        cardBorder: "#e5e7eb",
+        cardShadow: "0 1px 3px rgba(0,0,0,0.1)",
+        text: "#111827",
+        textMuted: "#6b7280",
+        border: "#e5e7eb",
+        inputBg: "#ffffff",
+        inputBorder: "#e5e7eb",
+        white: "#ffffff",
+        overlayHeaderFooter: "rgba(255,255,255,0.5)",
+        emptyText: "#a0a0b0"
+      }
+
+  return {
   appContainer: {
     display: "flex",
     height: "100vh",
     width: "100%",
     fontFamily: "system-ui, -apple-system, sans-serif",
-    backgroundColor: "#f3f4f6"
+    backgroundColor: colors.appBg
   },
 
   sidebarPanel: {
@@ -1178,14 +1609,17 @@ const styles = {
   quickTagsList: {
     display: "flex",
     flexWrap: "wrap",
-    gap: "6px"
+    gap: "6px",
+    maxHeight: "140px",
+    overflowY: "auto",
+    paddingRight: "2px"
   },
 
   quickTagButton: {
-    padding: "4px 8px",
-    backgroundColor: "#2a2a3a",
+    padding: "4px 4px 4px 8px",
+    backgroundColor: "transparent",
     color: "#8b5cf6",
-    border: "1px solid #3a3a4a",
+    border: "none",
     borderRadius: "12px",
     cursor: "pointer",
     fontSize: "10px"
@@ -1194,7 +1628,8 @@ const styles = {
   mainContent: {
     flex: 1,
     overflowY: "auto",
-    padding: "20px"
+    padding: "20px",
+    backgroundColor: colors.mainBg
   },
 
   breadcrumbs: {
@@ -1204,9 +1639,9 @@ const styles = {
     gap: "5px",
     marginBottom: "20px",
     padding: "10px 15px",
-    backgroundColor: "white",
+    backgroundColor: colors.cardBg,
     borderRadius: "10px",
-    boxShadow: "0 1px 3px rgba(0,0,0,0.1)"
+    boxShadow: colors.cardShadow
   },
 
   breadcrumbButton: {
@@ -1220,7 +1655,7 @@ const styles = {
   },
 
   breadcrumbSeparator: {
-    color: "#999",
+    color: colors.textMuted,
     fontSize: "14px"
   },
 
@@ -1236,12 +1671,12 @@ const styles = {
     alignItems: "center",
     gap: "12px",
     padding: "12px 16px",
-    backgroundColor: "white",
+    backgroundColor: colors.cardBg,
     borderRadius: "10px",
     cursor: "pointer",
     transition: "all 0.2s",
-    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-    border: "1px solid #e5e7eb"
+    boxShadow: colors.cardShadow,
+    border: `1px solid ${colors.cardBorder}`
   },
 
   folderRowIcon: {
@@ -1255,12 +1690,13 @@ const styles = {
   folderRowTitle: {
     fontSize: "16px",
     fontWeight: "500",
-    margin: 0
+    margin: 0,
+    color: colors.text
   },
 
   folderRowMeta: {
     fontSize: "11px",
-    color: "#9ca3af",
+    color: colors.textMuted,
     marginTop: "4px"
   },
 
@@ -1296,8 +1732,8 @@ const styles = {
     margin: "16px 0 12px 0",
     fontSize: "13px",
     fontWeight: "500",
-    color: "#6b7280",
-    borderBottom: "1px solid #e5e7eb",
+    color: colors.textMuted,
+    borderBottom: `1px solid ${colors.border}`,
     paddingBottom: "8px"
   },
 
@@ -1414,7 +1850,7 @@ const styles = {
 
   emptyState: {
     textAlign: "center",
-    color: "#a0a0b0",
+    color: colors.emptyText,
     padding: "60px 20px"
   },
 
@@ -1453,7 +1889,9 @@ const styles = {
     width: "100%",
     maxHeight: "85vh",
     overflowY: "auto",
-    borderRadius: "16px"
+    borderRadius: "16px",
+    backgroundColor: colors.cardBg,
+    color: colors.text
   },
 
   modalHeader: {
@@ -1461,8 +1899,8 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "flex-start",
     padding: "20px 24px",
-    borderBottom: "1px solid #e5e7eb",
-    backgroundColor: "rgba(255,255,255,0.5)",
+    borderBottom: `1px solid ${colors.border}`,
+    backgroundColor: colors.overlayHeaderFooter,
     position: "sticky",
     top: 0,
     zIndex: 1
@@ -1493,7 +1931,7 @@ const styles = {
     border: "none",
     fontSize: "24px",
     cursor: "pointer",
-    color: "#666"
+    color: colors.textMuted
   },
 
   editModalButton: {
@@ -1514,24 +1952,28 @@ const styles = {
     padding: "12px",
     fontSize: "18px",
     fontWeight: "500",
-    border: "2px solid #e5e7eb",
+    border: `2px solid ${colors.inputBorder}`,
     borderRadius: "8px",
     marginBottom: "16px",
     outline: "none",
-    boxSizing: "border-box"
+    boxSizing: "border-box",
+    backgroundColor: colors.inputBg,
+    color: colors.text
   },
 
   modalTextarea: {
     width: "100%",
     padding: "12px",
     fontSize: "14px",
-    border: "2px solid #e5e7eb",
+    border: `2px solid ${colors.inputBorder}`,
     borderRadius: "8px",
     minHeight: "200px",
     fontFamily: "inherit",
     resize: "vertical",
     outline: "none",
-    boxSizing: "border-box"
+    boxSizing: "border-box",
+    backgroundColor: colors.inputBg,
+    color: colors.text
   },
 
   modalText: {
@@ -1580,11 +2022,11 @@ const styles = {
 
   modalFooter: {
     padding: "16px 24px",
-    borderTop: "1px solid #e5e7eb",
+    borderTop: `1px solid ${colors.border}`,
     display: "flex",
     gap: "12px",
     justifyContent: "flex-end",
-    backgroundColor: "rgba(255,255,255,0.5)",
+    backgroundColor: colors.overlayHeaderFooter,
     position: "sticky",
     bottom: 0
   },
@@ -1636,12 +2078,13 @@ const styles = {
     width: "100%",
     padding: "10px",
     marginBottom: "8px",
-    backgroundColor: "#f3f4f6",
-    border: "1px solid #e5e7eb",
+    backgroundColor: isDark ? "#25253a" : "#f3f4f6",
+    border: `1px solid ${colors.border}`,
     borderRadius: "8px",
     cursor: "pointer",
     textAlign: "left",
-    fontSize: "14px"
+    fontSize: "14px",
+    color: colors.text
   },
 
   formField: {
@@ -1769,6 +2212,244 @@ const styles = {
     cursor: "pointer",
     fontSize: "12px",
     color: "#6b7280"
+  },
+
+  customColorSwatch: {
+    width: "32px",
+    height: "32px",
+    borderRadius: "6px",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "16px",
+    border: "1px dashed #9ca3af",
+    position: "relative",
+    overflow: "hidden",
+    background: "linear-gradient(135deg, #f87171, #fbbf24, #34d399, #60a5fa, #a78bfa)"
+  },
+
+  customColorInput: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    opacity: 0,
+    cursor: "pointer",
+    border: "none",
+    padding: 0
+  },
+
+  imagesGrid: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "10px"
+  },
+
+  imageThumbWrapper: {
+    position: "relative",
+    width: "70px",
+    height: "70px"
+  },
+
+  imageThumb: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    borderRadius: "8px",
+    border: "1px solid #e5e7eb"
+  },
+
+  imageRemoveButton: {
+    position: "absolute",
+    top: "-6px",
+    right: "-6px",
+    width: "20px",
+    height: "20px",
+    borderRadius: "50%",
+    border: "none",
+    backgroundColor: "#ef4444",
+    color: "white",
+    cursor: "pointer",
+    fontSize: "12px",
+    lineHeight: "20px",
+    padding: 0
+  },
+
+  imageAddButton: {
+    width: "70px",
+    height: "70px",
+    borderRadius: "8px",
+    border: "1px dashed #9ca3af",
+    backgroundColor: "#f3f4f6",
+    cursor: "pointer",
+    fontSize: "13px",
+    color: "#6b7280"
+  },
+
+  viewImagesGrid: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "10px",
+    marginTop: "16px"
+  },
+
+  viewImage: {
+    width: "140px",
+    height: "140px",
+    objectFit: "cover",
+    borderRadius: "10px",
+    border: "1px solid rgba(0,0,0,0.1)",
+    cursor: "pointer"
+  },
+
+  tableEditWrapper: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+    marginBottom: "10px"
+  },
+
+  tableEditRow: {
+    display: "flex",
+    gap: "6px",
+    alignItems: "center"
+  },
+
+  tableEditCell: {
+    flex: 1,
+    minWidth: 0,
+    padding: "8px",
+    border: "1px solid #e5e7eb",
+    borderRadius: "6px",
+    fontSize: "13px",
+    outline: "none"
+  },
+
+  tableRemoveButton: {
+    background: "none",
+    border: "none",
+    color: "#ef4444",
+    cursor: "pointer",
+    fontSize: "16px",
+    padding: "4px 6px",
+    flexShrink: 0
+  },
+
+  tableColRemoveButton: {
+    flex: 1,
+    background: "none",
+    border: "1px dashed #e5e7eb",
+    color: "#9ca3af",
+    cursor: "pointer",
+    fontSize: "11px",
+    borderRadius: "4px",
+    padding: "2px"
+  },
+
+  tableButtonsRow: {
+    display: "flex",
+    gap: "8px"
+  },
+
+  tableViewWrapper: {
+    overflowX: "auto"
+  },
+
+  tableView: {
+    borderCollapse: "collapse",
+    width: "100%",
+    fontSize: "13px"
+  },
+
+  tableViewHeaderCell: {
+    border: "1px solid rgba(0,0,0,0.15)",
+    padding: "8px 10px",
+    backgroundColor: "rgba(0,0,0,0.06)",
+    textAlign: "left",
+    fontWeight: "600"
+  },
+
+  tableViewCell: {
+    border: "1px solid rgba(0,0,0,0.15)",
+    padding: "8px 10px",
+    textAlign: "left"
+  },
+
+  cardImageBadge: {
+    fontSize: "10px",
+    color: colors.textMuted,
+    marginBottom: "6px"
+  },
+
+  quickTagChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "2px",
+    backgroundColor: "#2a2a3a",
+    borderRadius: "12px",
+    paddingRight: "4px"
+  },
+
+  quickTagDeleteButton: {
+    background: "none",
+    border: "none",
+    color: "#ef4444",
+    cursor: "pointer",
+    fontSize: "12px",
+    padding: "0 4px",
+    lineHeight: 1
+  },
+
+  themeToggleWrapper: {
+    position: "fixed",
+    bottom: "24px",
+    right: "24px",
+    zIndex: 2000,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: "10px"
+  },
+
+  themeToggleButton: {
+    width: "52px",
+    height: "52px",
+    borderRadius: "50%",
+    border: "none",
+    cursor: "pointer",
+    fontSize: "22px",
+    boxShadow: "0 4px 14px rgba(0,0,0,0.25)"
+  },
+
+  themeMenu: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    backgroundColor: colors.cardBg,
+    color: colors.text,
+    borderRadius: "10px",
+    padding: "6px",
+    boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
+    border: `1px solid ${colors.cardBorder}`
+  },
+
+  themeMenuItem: {
+    background: "none",
+    border: "none",
+    textAlign: "left",
+    padding: "8px 12px",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontSize: "13px",
+    color: colors.text,
+    whiteSpace: "nowrap"
+  },
+
+  themeMenuItemActive: {
+    backgroundColor: "#8b5cf6",
+    color: "white"
+  }
   }
 }
 

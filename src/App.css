@@ -10,6 +10,10 @@ html, body {
   width: 100%;
 }
 
+body {
+  transition: background-color 0.25s ease;
+}
+
 #root {
   height: 100%;
   width: 100%;
