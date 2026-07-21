@@ -100,6 +100,19 @@ function App() {
   const isDarkMode = theme === "dark" || (theme === "system" && systemPrefersDark)
   const [showThemeMenu, setShowThemeMenu] = useState(false)
 
+  const [isMobileView, setIsMobileView] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia ? window.matchMedia("(max-width: 768px)").matches : false
+  )
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false)
+
+  useEffect(() => {
+    if (!window.matchMedia) return
+    const mediaQuery = window.matchMedia("(max-width: 768px)")
+    const handleChange = (e) => setIsMobileView(e.matches)
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [])
+
   const newNoteFileInputRef = useRef(null)
   const editNoteFileInputRef = useRef(null)
 
@@ -721,11 +734,20 @@ function App() {
   const notes = getFilteredAndSortedNotes()
   const allExistingTags = getAllExistingTags()
   const allFolders = getAllFoldersList()
-  const styles = useMemo(() => getStyles(isDarkMode), [isDarkMode])
+  const styles = useMemo(() => getStyles(isDarkMode, isMobileView), [isDarkMode, isMobileView])
 
   return (
     <div style={styles.appContainer}>
-      <div style={styles.sidebarPanel}>
+      {isMobileView && showMobileSidebar && (
+        <div style={styles.mobileSidebarOverlay} onClick={() => setShowMobileSidebar(false)} />
+      )}
+      <div style={{
+        ...styles.sidebarPanel,
+        ...(isMobileView ? { transform: showMobileSidebar ? "translateX(0)" : "translateX(-100%)" } : {})
+      }}>
+        {isMobileView && (
+          <button onClick={() => setShowMobileSidebar(false)} style={{...styles.closeButton, color: "#ffffff", alignSelf: "flex-end", padding: "12px 16px"}}>×</button>
+        )}
         <h1 style={styles.logoText}>Zametki online</h1>
         
         <button 
@@ -734,6 +756,7 @@ function App() {
             setIsCreatingNewNote(true)
             setOpenedNote(null)
             resetNewNoteForm()
+            setShowMobileSidebar(false)
           }}
         >
           + Создать заметку
@@ -744,6 +767,7 @@ function App() {
           onClick={() => {
             setIsCreatingNewFolder(true)
             setNewFolderName("")
+            setShowMobileSidebar(false)
           }}
         >
           📁 Создать папку
@@ -751,7 +775,7 @@ function App() {
 
         <button 
           style={{...styles.createNoteButton, backgroundColor: "#8b5cf6", marginTop: "0"}}
-          onClick={() => setShowArchive(!showArchive)}
+          onClick={() => { setShowArchive(!showArchive); setShowMobileSidebar(false) }}
         >
           📦 Архив ({archiveNotes.length})
         </button>
@@ -818,7 +842,7 @@ function App() {
               {allExistingTags.map(tag => (
                 <span key={tag} style={styles.quickTagChip}>
                   <button
-                    onClick={() => setTagSearchText(tag)}
+                    onClick={() => { setTagSearchText(tag); setShowMobileSidebar(false) }}
                     style={styles.quickTagButton}
                     title="Найти заметки с этим тегом"
                   >
@@ -844,6 +868,12 @@ function App() {
       </div>
 
       <div style={styles.mainContent}>
+        {isMobileView && (
+          <div style={styles.mobileTopBar}>
+            <button onClick={() => setShowMobileSidebar(true)} style={styles.mobileMenuButton}>☰</button>
+            <h2 style={styles.mobileTopBarTitle}>Zametki online</h2>
+          </div>
+        )}
         {showArchive ? (
           <>
             <div style={styles.breadcrumbs}>
@@ -1466,7 +1496,7 @@ function App() {
   )
 }
 
-function getStyles(isDark) {
+function getStyles(isDark, isMobile) {
   const colors = isDark
     ? {
         appBg: "#0f0f1a",
@@ -1512,16 +1542,70 @@ function getStyles(isDark) {
     backgroundColor: colors.appBg
   },
 
-  sidebarPanel: {
-    width: "280px",
-    backgroundColor: "#1a1a2e",
-    color: "#ffffff",
+  sidebarPanel: isMobile
+    ? {
+        width: "82vw",
+        maxWidth: "320px",
+        backgroundColor: "#1a1a2e",
+        color: "#ffffff",
+        display: "flex",
+        flexDirection: "column",
+        borderRight: "1px solid #2d2d3f",
+        overflowY: "auto",
+        position: "fixed",
+        top: 0,
+        bottom: 0,
+        left: 0,
+        zIndex: 1500,
+        boxShadow: "4px 0 20px rgba(0,0,0,0.4)",
+        transition: "transform 0.25s ease"
+      }
+    : {
+        width: "280px",
+        backgroundColor: "#1a1a2e",
+        color: "#ffffff",
+        display: "flex",
+        flexDirection: "column",
+        borderRight: "1px solid #2d2d3f",
+        overflowY: "auto",
+        position: "relative",
+        zIndex: 1
+      },
+
+  mobileSidebarOverlay: {
+    position: "fixed",
+    inset: 0,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    zIndex: 1400
+  },
+
+  mobileTopBar: {
     display: "flex",
-    flexDirection: "column",
-    borderRight: "1px solid #2d2d3f",
-    overflowY: "auto",
-    position: "relative",
-    zIndex: 1
+    alignItems: "center",
+    gap: "12px",
+    padding: "10px 16px",
+    backgroundColor: colors.cardBg,
+    borderBottom: `1px solid ${colors.border}`,
+    position: "sticky",
+    top: 0,
+    zIndex: 10,
+    marginBottom: "12px"
+  },
+
+  mobileMenuButton: {
+    background: "none",
+    border: "none",
+    fontSize: "22px",
+    cursor: "pointer",
+    color: colors.text,
+    padding: "4px 8px"
+  },
+
+  mobileTopBarTitle: {
+    fontSize: "16px",
+    fontWeight: "600",
+    color: colors.text,
+    margin: 0
   },
 
   logoText: {
@@ -1570,12 +1654,13 @@ function getStyles(isDark) {
   filterSection: {
     padding: "12px 16px",
     display: "flex",
+    flexWrap: "wrap",
     gap: "8px",
     borderBottom: "1px solid #2d2d3f"
   },
 
   filterButton: {
-    flex: 1,
+    flex: "1 1 40%",
     padding: "8px",
     backgroundColor: "#2a2a3a",
     color: "white",
@@ -1628,7 +1713,9 @@ function getStyles(isDark) {
   mainContent: {
     flex: 1,
     overflowY: "auto",
-    padding: "20px",
+    padding: isMobile ? "0 12px 20px" : "20px",
+    width: "100%",
+    minWidth: 0,
     backgroundColor: colors.mainBg
   },
 
@@ -1743,8 +1830,8 @@ function getStyles(isDark) {
 
   notesGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-    gap: "20px"
+    gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))",
+    gap: isMobile ? "12px" : "20px"
   },
 
   noteCard: {
@@ -1871,25 +1958,34 @@ function getStyles(isDark) {
     bottom: 0,
     backgroundColor: "rgba(0,0,0,0.5)",
     display: "flex",
-    alignItems: "center",
+    alignItems: isMobile ? "flex-end" : "center",
     justifyContent: "center",
     zIndex: 1000
   },
 
-  modalWindow: {
-    width: "90%",
-    maxWidth: "600px",
-    maxHeight: "85vh",
-    backgroundColor: "transparent",
-    borderRadius: "16px",
-    overflow: "hidden"
-  },
+  modalWindow: isMobile
+    ? {
+        width: "100%",
+        maxWidth: "100%",
+        maxHeight: "92vh",
+        backgroundColor: "transparent",
+        borderRadius: "16px 16px 0 0",
+        overflow: "hidden"
+      }
+    : {
+        width: "90%",
+        maxWidth: "600px",
+        maxHeight: "85vh",
+        backgroundColor: "transparent",
+        borderRadius: "16px",
+        overflow: "hidden"
+      },
 
   modalContent: {
     width: "100%",
-    maxHeight: "85vh",
+    maxHeight: isMobile ? "92vh" : "85vh",
     overflowY: "auto",
-    borderRadius: "16px",
+    borderRadius: isMobile ? "16px 16px 0 0" : "16px",
     backgroundColor: colors.cardBg,
     color: colors.text
   },
@@ -1898,7 +1994,7 @@ function getStyles(isDark) {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    padding: "20px 24px",
+    padding: isMobile ? "16px 16px" : "20px 24px",
     borderBottom: `1px solid ${colors.border}`,
     backgroundColor: colors.overlayHeaderFooter,
     position: "sticky",
@@ -1943,7 +2039,7 @@ function getStyles(isDark) {
   },
 
   modalBody: {
-    padding: "24px",
+    padding: isMobile ? "16px" : "24px",
     overflowY: "auto"
   },
 
@@ -2403,8 +2499,8 @@ function getStyles(isDark) {
 
   themeToggleWrapper: {
     position: "fixed",
-    bottom: "24px",
-    right: "24px",
+    bottom: isMobile ? "16px" : "24px",
+    right: isMobile ? "16px" : "24px",
     zIndex: 2000,
     display: "flex",
     flexDirection: "column",
@@ -2413,12 +2509,12 @@ function getStyles(isDark) {
   },
 
   themeToggleButton: {
-    width: "52px",
-    height: "52px",
+    width: isMobile ? "46px" : "52px",
+    height: isMobile ? "46px" : "52px",
     borderRadius: "50%",
     border: "none",
     cursor: "pointer",
-    fontSize: "22px",
+    fontSize: isMobile ? "19px" : "22px",
     boxShadow: "0 4px 14px rgba(0,0,0,0.25)"
   },
 
